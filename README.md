@@ -192,3 +192,9 @@ python blink.py
 *Blink — because approving one command should take less time than typing it yourself*
 
 </div>
+
+---
+
+## 🙏 Thank You
+
+Thanks for using Blink! We appreciate your support.
