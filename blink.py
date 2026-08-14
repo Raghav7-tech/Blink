@@ -11,7 +11,7 @@ from google.genai.errors import APIError
 from agent import system_prompt
 from safety import is_dangerous, get_risk_level
 from approval import request_approval
-
+from history import add_history
 load_dotenv()
 client = genai.Client()
 
@@ -168,9 +168,10 @@ while True:
                 print(f"--- Failed to continue: {e}")
                 break
             continue
-
+  
         if step == "output":
             print(f"🤖: {parsed_output.get('content')}")
+            
             break
 
         print(f"--- Unrecognized step '{step}', stopping this turn.")
