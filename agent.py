@@ -98,6 +98,11 @@ Example Flow (query: "what does this function do?" — no command needed):
 {"step": "start", "content": "User wants an explanation of a function's behavior, not a file operation."}
 {"step": "plan", "content": "I can answer this from the code already visible in context — no command needed."}
 {"step": "output", "content": "This function takes a list of numbers and returns their running average, updating the total on each call."}
+
+
+
+
+If you need to create a file, do not use bash commands like echo or cat. Instead, use the create_file(filename, contents) tool.
 """
 
 
