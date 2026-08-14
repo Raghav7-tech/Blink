@@ -16,29 +16,38 @@ load_dotenv()
 client = genai.Client()
 
 
+def send_with_retry(chat, message, max_retries=5):
+    """Sends a message to the chat, retrying with backoff on 429 rate limits."""
+    for attempt in range(max_retries):
+        try:
+            return chat.send_message(message)
+        except APIError as e:
+            if getattr(e, "code", None) == 429:
+                wait = 30 * (attempt + 1)  # simple linear backoff
+                print(f"⏳ Rate limit hit. Waiting {wait}s before retry ({attempt + 1}/{max_retries})...")
+                time.sleep(wait)
+                continue
+            print(f"--- API error: {e}")
+            raise
+    raise RuntimeError("Exceeded max retries due to repeated rate limiting.")
+
+
 @observe()
 def run_command(command: str, risk: str = "medium", reasoning: str = "") -> str:
     """
     Executes a single shell command inside the project's working directory and
     returns its stdout, stderr, and exit code. Subject to an automated safety
     filter and/or human approval before it runs.
-    """
-    # Hard deny — never runs, never asks, regardless of self-reported risk.
+    """ 
     if is_dangerous(command):
-        return "⛔ Command blocked by safety filter (hard deny)."
-
-    # Cross-check the model's self-reported risk against our own classifier —
-    # never trust the model's rating alone. Take whichever is more cautious.
+        return "⛔ Command blocked by safety filter (hard deny)." 
     actual_risk = get_risk_level(command)
     risk_order = {"low": 0, "medium": 1, "high": 2}
     effective_risk = max([risk, actual_risk], key=lambda r: risk_order.get(r, 1))
-
-    # Low risk + read-only classified by our own checker -> auto-run, no prompt.
     if effective_risk == "low":
         print(f"✅ Auto-approved (read-only): {command}")
         return _execute(command)
-
-    # Medium/high -> always go through human approval.
+ 
     approval = request_approval(command, reasoning, effective_risk)
 
     if approval == "approve":
@@ -76,8 +85,8 @@ available_tools = {
 config = types.GenerateContentConfig(
     system_instruction=system_prompt,
     response_mime_type="application/json",
-    temperature=0.4
 )
+
 chat = client.chats.create(model="gemini-3.6-flash", config=config)
 MAX_LOOP_STEPS = 15
 
@@ -87,12 +96,9 @@ while True:
         continue
 
     try:
-        response = chat.send_message(user_query)
-    except APIError as e:
-        if getattr(e, "code", None) == 429:
-            print("Rate limit hit. Please wait a few seconds before trying again.")
-            continue
-        print(f"--- API error: {e}")
+        response = send_with_retry(chat, user_query)
+    except Exception as e:
+        print(f"--- Failed to get response: {e}")
         continue
 
     loop_count = 0
@@ -112,13 +118,21 @@ while True:
 
         if step == "start":
             print(f"🔍: {parsed_output.get('content')}")
-            response = chat.send_message("Continue to the next step.")
+            try:
+                response = send_with_retry(chat, "Continue to the next step.")
+            except Exception as e:
+                print(f"--- Failed to continue: {e}")
+                break
             continue
 
         if step == "plan":
             print(f"🧠: {parsed_output.get('content')}")
-            time.sleep(1)
-            response = chat.send_message("Continue to the next step.")
+            time.sleep(2)
+            try:
+                response = send_with_retry(chat, "Continue to the next step.")
+            except Exception as e:
+                print(f"--- Failed to continue: {e}")
+                break
             continue
 
         if step == "action":
@@ -134,7 +148,11 @@ while True:
                     "step": "observe",
                     "output": f"Error: unknown tool '{tool_name}'."
                 })
-                response = chat.send_message(observation_msg)
+                try:
+                    response = send_with_retry(chat, observation_msg)
+                except Exception as e:
+                    print(f"--- Failed to continue: {e}")
+                    break
                 continue
 
             try:
@@ -143,8 +161,12 @@ while True:
                 output = f"Error while running tool '{tool_name}': {e}"
 
             observation_msg = json.dumps({"step": "observe", "output": output})
-            time.sleep(1)
-            response = chat.send_message(observation_msg)
+            time.sleep(2)
+            try:
+                response = send_with_retry(chat, observation_msg)
+            except Exception as e:
+                print(f"--- Failed to continue: {e}")
+                break
             continue
 
         if step == "output":
